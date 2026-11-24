@@ -1,0 +1,46 @@
+defaults:
+  - model: cifar_resnet
+  - data: cifar10
+  - trainer: cifar_resnet
+  # Replaces the model's normalization layers: dyt, dysoftsign, none, batchnorm, layernorm
+  # (config/norm/). null keeps the model's own (BatchNorm2d for ResNets, LayerNorm for
+  # the Transformer).
+  - norm: null
+  - _self_
+
+seed: 0
+# Path of a checkpoint.pt to continue training from.
+resume_from: null
+
+# Statistics of an early, a middle and a late block during training (nstudy/core/probes.py).
+# ResNet: the ReLU input after conv1 and the conv1 weights. Transformer: the outputs of
+# the norms of encoder and decoder layers, and the last linear of the sub-layer each wraps
+# (attention out_proj, feed-forward linear2). Measured on one fixed batch of training
+# examples (no augmentation), the size of one GPU's share of a training batch.
+probe:
+  enabled: true
+  # Block indices to watch (negative ones count from the end); null: first, middle and last.
+  blocks: null
+  # Norms and (15, 50, 85)th percentiles of the tensors, and norms of their gradients.
+  stats_every: ${trainer.eval_every}
+  # Histograms of the tensors.
+  histogram_every: ${trainer.eval_every}
+  bins: 64
+
+# Weights & Biases. Every row of metrics.jsonl is also sent to wandb (rank 0 only).
+wandb:
+  # online: stream to wandb (run `wandb login` once on the machine)
+  # offline: keep in <run dir>/wandb and upload later with `wandb sync`
+  # disabled: no wandb; metrics.jsonl is still written
+  mode: online
+  project: nstudy
+  entity: null
+  # Runs to compare side by side, e.g. all seeds of one setting.
+  group: null
+  # The run directory's name when null.
+  name: null
+  # Added to the automatic tags: dataset, model and normalization layer.
+  tags: []
+  notes: null
+  # Upload the final checkpoint as a wandb artifact.
+  log_checkpoint: false

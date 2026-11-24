@@ -1,0 +1,10 @@
+# @package model.norm_layer
+# gamma * alpha * x + beta (nstudy/core/norms.py).
+# alpha_init null: alpha starts at 1 / sqrt(d), d = d_model (Transformer) or the fan-in
+# in_channels * k * k of the conv before the norm (ResNet). A number is used as is.
+_target_: nstudy.core.norms.DynamicScale
+_partial_: true
+alpha_init: null
+per_channel_alpha: false
+# false drops beta; a ResNet's convs then have no bias at all.
+bias: true

@@ -1,0 +1,28 @@
+# CIFAR training of He et al. 2016, Section 4.2.
+task:
+  _target_: nstudy.core.evaluator.classification
+# 64k iterations at batch size 128 (set in the data config).
+max_steps: 64000
+# Batches averaged into one update.
+accumulate: 1
+eval_every: 1000
+log_every: 100
+# Held-out splits evaluated every eval_every updates (Figure 6 plots the test error).
+eval_splits: [val, test]
+# fp32 as in the papers, or bf16 (autocast) for speed. Keep it the same across compared runs.
+precision: fp32
+optimizer:
+  _target_: torch.optim.SGD
+  _partial_: true
+  lr: 0.1
+  momentum: 0.9
+  weight_decay: 0.0001
+scheduler:
+  _target_: nstudy.core.trainer.step_schedule
+  _partial_: true
+  # Divide the learning rate by 10 at 32k and 48k iterations.
+  milestones: [32000, 48000]
+  gamma: 0.1
+  # ResNet-110 only: set warmup_steps to 400 to start at 0.01, as in the paper.
+  warmup_steps: 0
+  warmup_factor: 0.1

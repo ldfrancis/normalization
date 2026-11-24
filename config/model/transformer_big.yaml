@@ -1,0 +1,9 @@
+# Transformer big (Vaswani et al. 2017, Table 3).
+defaults:
+  - transformer_base
+  - _self_
+
+d_model: 1024
+num_heads: 16
+d_ff: 4096
+dropout: 0.3

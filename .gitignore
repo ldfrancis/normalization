@@ -1,0 +1,10 @@
+data/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.sync/
+run.sh
+sync*
+.vscode/
+*.md

@@ -1,0 +1,8 @@
+# CIFAR ResNet (He et al. 2016, Section 4.2). depth must be 6n+2: 20, 32, 44, 56, 110.
+_target_: nstudy.core.model.cifar_resnet
+depth: 56
+num_classes: 10
+shortcut: A
+norm_layer:
+  _target_: torch.nn.BatchNorm2d
+  _partial_: true

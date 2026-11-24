@@ -1,0 +1,11 @@
+# ImageNet ResNet (He et al. 2016, Table 1). depth must be 18, 34, 50, 101 or 152.
+_target_: nstudy.core.model.imagenet_resnet
+depth: 50
+num_classes: 1000
+shortcut: B
+# false: stride on the first 1x1 conv of a bottleneck (paper).
+# true: stride on the 3x3 conv (torchvision).
+stride_in_3x3: false
+norm_layer:
+  _target_: torch.nn.BatchNorm2d
+  _partial_: true

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nstudy"
+version = "0.1.0"
+description = "A study of normalization layers in deep neural networks"
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "torchvision",
+    "numpy",
+    "hydra-core",
+    "datasets",
+    "tokenizers",
+    "sacrebleu",
+    "wandb",
+]
+
+[project.optional-dependencies]
+test = ["pytest", "transformers"]
+# Figures of nstudy/norm_io.py.
+analysis = ["matplotlib"]
+
+[tool.setuptools]
+packages = ["nstudy", "nstudy.core"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

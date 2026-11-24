@@ -1,0 +1,37 @@
+# Input/output of normalization layers of a trained model, before their scale and shift
+# (nstudy/norm_io.py). The model, data and task come from the training run's own config.
+#
+#   python nstudy/norm_io.py run_dir=outputs/baselines/cifar10_resnet56_seed0
+
+# Directory of a finished training run (has .hydra/config.yaml and checkpoint.pt).
+run_dir: ???
+# Checkpoint to load; null: <run_dir>/checkpoint.pt.
+checkpoint: null
+# Held-out split the examples come from: val or test (CIFAR), val (ImageNet, WMT).
+split: val
+# Number of examples (images or sentence pairs), rounded up to whole batches.
+examples: 512
+# Batch size of the passes; null: the training run's batch size. In mode=train it sets
+# how many examples each BatchNorm batch statistic is computed over.
+batch_size: null
+# eval: running statistics, as the trained model is used. train: batch statistics.
+mode: eval
+# Blocks to watch (as probe.blocks); null: first, middle and last.
+blocks: null
+# Points kept per layer, chosen at random among all elements of all examples.
+max_points: 200000
+# Channels coloured in the figure; the others are grey.
+channels: 8
+seed: 0
+
+wandb:
+  # online | offline | disabled. Logs the figure to a run in the training run's group.
+  mode: online
+  project: nstudy
+  entity: null
+  # Also upload the recorded points (points.pt) as an artifact.
+  log_points: false
+
+hydra:
+  run:
+    dir: ${run_dir}/norm_io/${split}_${mode}

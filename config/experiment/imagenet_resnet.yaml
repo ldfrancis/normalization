@@ -1,0 +1,9 @@
+# @package _global_
+# ResNet-50 on ImageNet. Other depths: model.depth=18|34|101|152.
+defaults:
+  - override /model: imagenet_resnet
+  - override /data: imagenet
+  - override /trainer: imagenet_resnet
+
+model:
+  depth: 50

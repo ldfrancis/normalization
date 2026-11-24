@@ -1,0 +1,9 @@
+# @package _global_
+# Transformer big on WMT 2014 English-German.
+defaults:
+  - override /model: transformer_big
+  - override /data: wmt14_en_de
+  - override /trainer: transformer_big
+
+model:
+  vocab_size: ${data.vocab_size}

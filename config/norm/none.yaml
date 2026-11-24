@@ -1,0 +1,4 @@
+# @package model.norm_layer
+# No normalization: every norm layer is the identity.
+_target_: torch.nn.Identity
+_partial_: true

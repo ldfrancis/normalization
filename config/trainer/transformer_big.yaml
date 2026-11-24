@@ -1,0 +1,6 @@
+# Training of the big model in Vaswani et al. 2017, Section 5.
+defaults:
+  - transformer_base
+  - _self_
+
+max_steps: 300000

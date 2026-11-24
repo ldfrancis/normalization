@@ -1,0 +1,10 @@
+# @package _global_
+# ResNet-56 on CIFAR-10. Other depths: model.depth=20|32|44|110.
+defaults:
+  - override /model: cifar_resnet
+  - override /data: cifar10
+  - override /trainer: cifar_resnet
+
+model:
+  depth: 56
+  num_classes: 10

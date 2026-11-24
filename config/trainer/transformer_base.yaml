@@ -1,0 +1,35 @@
+# Training of the base model in Vaswani et al. 2017, Section 5.
+task:
+  _target_: nstudy.core.evaluator.translation
+  label_smoothing: 0.1
+  # BLEU is computed by translating with beam search (Section 6.1).
+  tokenizer_file: ${data.root}/bpe-${data.vocab_size}.json
+  beam_size: 4
+  length_penalty: 0.6
+  # Translations may be at most this much longer than the source.
+  max_extra_length: 50
+max_steps: 100000
+# Batches averaged into one update. The paper's update covers about 25000
+# tokens per side: on 8 GPUs keep 1; with fewer GPUs, keep
+# data.max_tokens x accumulate at 25000 (e.g. 1 GPU: max_tokens=6250, accumulate=4).
+accumulate: 1
+eval_every: 2000
+log_every: 100
+# Held-out splits evaluated every eval_every updates. Each runs beam search over
+# the whole split; test (newstest2014) is evaluated at the end of training.
+eval_splits: [val]
+# fp32 as in the papers, or bf16 (autocast) for speed. Keep it the same across compared runs.
+precision: fp32
+optimizer:
+  _target_: torch.optim.Adam
+  _partial_: true
+  _convert_: all
+  # The schedule supplies the learning rate, so the base rate stays at 1.
+  lr: 1.0
+  betas: [0.9, 0.98]
+  eps: 1.0e-09
+scheduler:
+  _target_: nstudy.core.trainer.noam_schedule
+  _partial_: true
+  d_model: ${model.d_model}
+  warmup_steps: 4000

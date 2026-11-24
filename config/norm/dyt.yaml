@@ -1,0 +1,8 @@
+# @package model.norm_layer
+# gamma * tanh(alpha * x) + beta (nstudy/core/norms.py). alpha: one learned number per layer.
+_target_: nstudy.core.norms.DynamicTanh
+_partial_: true
+alpha_init: 0.5
+per_channel_alpha: false
+# false drops beta; a ResNet's convs then have no bias at all.
+bias: true

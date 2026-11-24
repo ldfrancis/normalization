@@ -1,0 +1,27 @@
+# ImageNet training of He et al. 2016, Section 3.4.
+task:
+  _target_: nstudy.core.evaluator.classification
+# 90 epochs at batch size 256 (5005 iterations per epoch).
+max_steps: 450000
+accumulate: 1
+eval_every: 5000
+log_every: 100
+# Held-out splits evaluated every eval_every updates (ImageNet has no labelled test split).
+eval_splits: [val]
+# fp32 as in the papers, or bf16 (autocast) for speed. Keep it the same across compared runs.
+precision: fp32
+optimizer:
+  _target_: torch.optim.SGD
+  _partial_: true
+  lr: 0.1
+  momentum: 0.9
+  weight_decay: 0.0001
+scheduler:
+  _target_: nstudy.core.trainer.step_schedule
+  _partial_: true
+  # The paper divides by 10 "when the error plateaus"; these are the usual
+  # fixed points, at epochs 30 and 60.
+  milestones: [150000, 300000]
+  gamma: 0.1
+  warmup_steps: 0
+  warmup_factor: 0.1
