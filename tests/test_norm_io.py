@@ -55,7 +55,7 @@ def test_eval_mode_batchnorm_normalizes_with_running_statistics():
     before = {k: v.clone() for k, v in model.state_dict().items()}
     layers, recorder = record(model, [images()])
     probes = {p.name: p for p in model_probes(model)}
-    assert list(layers) == ["layer1.0", "layer2.0", "layer3.0"]
+    assert list(layers) == ["stage1.block1.layer2", "stage2.block1.layer4", "stage3.block1.layer6"]
     assert [recorder.records[n].position for n in layers] == ["early", "mid", "late"]
     for name, points in layers.items():
         norm = probes[name].module
@@ -63,8 +63,8 @@ def test_eval_mode_batchnorm_normalizes_with_running_statistics():
         std = torch.sqrt(norm.running_var[c] + norm.eps)
         assert torch.allclose(points["x_hat"], (points["x"] - norm.running_mean[c]) / std, atol=1e-4)
         assert torch.allclose(points["y"], norm.weight[c] * points["x_hat"] + norm.bias[c], atol=1e-4)
-    # ResNet-8 layer1.0.bn1 output: 6 images x 16 channels x 32 x 32, all kept.
-    assert layers["layer1.0"]["x"].numel() == 6 * 16 * 32 * 32
+    # ResNet-8 stage1.block1 bn1 output: 6 images x 16 channels x 32 x 32, all kept.
+    assert layers["stage1.block1.layer2"]["x"].numel() == 6 * 16 * 32 * 32
     for key, value in model.state_dict().items():
         assert torch.equal(value, before[key]), key
 
@@ -73,7 +73,7 @@ def test_train_mode_batchnorm_uses_batch_statistics_and_changes_nothing():
     model = trained_looking_resnet()
     before = {k: v.clone() for k, v in model.state_dict().items()}
     layers, _ = record(model, [images(8)], mode="train")
-    points = layers["layer1.0"]
+    points = layers["stage1.block1.layer2"]
     for channel in range(16):
         x_hat = points["x_hat"][points["channel"] == channel]
         assert abs(x_hat.mean().item()) < 1e-4
@@ -100,17 +100,17 @@ def test_transformer_layernorm_points_leave_out_padding():
     batch = {"src": src, "tgt_in": tgt, "tgt_out": tgt}
     layers, recorder = record(model, [batch])
 
-    assert set(layers) == {f"{side}.{i}.norm{n}" for side in ("encoder", "decoder")
-                           for i in (0, 1, 2) for n in ((1, 2) if side == "encoder" else (1, 2, 3))}
-    assert recorder.records["encoder.0.norm1"].position == "early"
-    assert recorder.records["decoder.2.norm3"].position == "late"
+    assert set(layers) == {f"{side}.layer{i}.norm{n}" for side in ("encoder", "decoder")
+                           for i in (1, 2, 3) for n in ((1, 2) if side == "encoder" else (1, 2, 3))}
+    assert recorder.records["encoder.layer1.norm1"].position == "early"
+    assert recorder.records["decoder.layer3.norm3"].position == "late"
     for name, points in layers.items():
         # 5 non-padding tokens on each side (3 + 2 source, 2 + 3 target), 16 channels each.
         assert points["x"].numel() == 5 * 16, name
         # Every token is normalized to mean 0 and variance 1 over its 16 channels.
         assert abs(points["x_hat"].mean().item()) < 1e-4
         assert points["x_hat"].pow(2).mean().item() == pytest.approx(1.0, abs=1e-3)
-        norm = dict(model.named_modules())[name]
+        norm = next(p.module for p in recorder.probes if p.name == name)
         c = points["channel"]
         assert torch.allclose(points["y"], norm.weight[c] * points["x_hat"] + norm.bias[c], atol=1e-5)
 
@@ -122,8 +122,8 @@ def test_points_are_saved_and_plotted(tmp_path):
     norm_io.save(recorder.records, tmp_path / "points.pt", {"mode": "eval"})
     saved = torch.load(tmp_path / "points.pt")
     assert saved["metadata"] == {"mode": "eval"}
-    assert saved["layers"]["layer2.0"]["position"] == "mid"
-    assert saved["layers"]["layer2.0"]["x"].numel() == 500
+    assert saved["layers"]["stage2.block1.layer4"]["position"] == "mid"
+    assert saved["layers"]["stage2.block1.layer4"]["x"].numel() == 500
     norm_io.plot(saved["layers"], tmp_path / "norm_io.png", title="test")
     assert (tmp_path / "norm_io.png").stat().st_size > 0
 

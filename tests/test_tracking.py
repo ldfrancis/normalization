@@ -264,7 +264,7 @@ def test_wandb_logger_continues_the_run_of_its_directory(tmp_path, offline):
 def test_wandb_logger_logs_probe_histograms_offline(tmp_path, offline):
     logger = WandbLogger(tmp_path, config={}, **offline)
     try:
-        logger.log_histograms(10, {"layer1.0/relu_input": {"counts": [1, 3, 2],
+        logger.log_histograms(10, {"stage1.block1.layer2/relu_input": {"counts": [1, 3, 2],
                                                            "edges": [0.0, 1.0, 2.0, 3.0]}})
     finally:
         logger.finish()
@@ -294,7 +294,7 @@ def test_transformer_sublayer_weights_get_their_training_gradient_norms(tmp_path
                       max_steps=2, output_dir=tmp_path, device=CPU, log_every=2, probes=probes)
     trainer.fit()
     (row,) = [row for row in read_metrics(tmp_path) if row["split"] == "train"]
-    assert "decoder.2.norm2/cross_attn_out_proj_weight" in norms
+    assert "decoder.layer3.norm2/cross_attn_out_proj_weight" in norms
     assert len(norms) == 15  # 3 encoder layers x 2 norms + 3 decoder layers x 3 norms
     for key, values in norms.items():
         assert row[f"{key}_grad_norm"] == pytest.approx(values[-1], rel=1e-5)

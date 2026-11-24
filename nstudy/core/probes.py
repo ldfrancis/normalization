@@ -54,13 +54,17 @@ class Probe:
     """One watched place in the network.
 
     Args:
-        name: block name, such as ``"layer2.4"`` or ``"decoder.0.norm2"``.
+        name: what the logs call the place, such as ``"stage3.block9.layer54"``
+            (ResNet-56: stage 3, its 9th block, whose ``conv1`` is the 54th
+            weighted layer) or ``"decoder.layer1.norm2"``. Counted from 1.
         module: the module whose output is recorded.
         activation: what that output is called in the logs.
         weight: a parameter recorded alongside, or None.
         weight_name: what that parameter is called in the logs.
         side: ``"encoder"`` or ``"decoder"`` for Transformer outputs, whose
             padded positions are left out; None otherwise.
+        block: index of the block (ResNet, over the whole network) or layer
+            (Transformer, within its stack), from 0, to order probes by depth.
     """
 
     name: str
@@ -69,6 +73,7 @@ class Probe:
     weight: nn.Parameter | None = None
     weight_name: str | None = None
     side: str | None = None
+    block: int = 0
 
 
 def default_blocks(count: int) -> list[int]:
@@ -88,24 +93,44 @@ def pick(count: int, blocks: Sequence[int] | None) -> list[int]:
     return picked
 
 
+def weighted_layers(model: ResNet) -> dict[nn.Module, int]:
+    """The depth of each conv and linear, counted from 1 as in "ResNet-56".
+
+    The stem conv is layer 1, the residual blocks' convs follow in order and
+    the final linear is the last (56 in ResNet-56, 50 in ResNet-50). Projection
+    shortcuts (option B) are not counted, as in the papers' depths.
+    """
+    modules = [
+        module for name, module in model.named_modules()
+        if isinstance(module, (nn.Conv2d, nn.Linear)) and "downsample" not in name
+    ]
+    return {module: depth for depth, module in enumerate(modules, start=1)}
+
+
 def resnet_probes(model: ResNet, blocks: Sequence[int] | None = None) -> list[Probe]:
     """The ReLU input after ``conv1`` and the ``conv1`` weights of chosen blocks.
 
-    ``blocks`` indexes all residual blocks of the network in order (ResNet-56
-    has 27); by default the first, the middle and the last.
+    ``blocks`` indexes all residual blocks of the network in order, from 0
+    (ResNet-56 has 27); by default the first, the middle and the last. Probes
+    are named ``stage<s>.block<b>.layer<d>``: the stage, the block within it
+    and the depth of its ``conv1`` (see ``weighted_layers``), all from 1. The
+    model's own module names (``layer3.8``, as in torchvision) are unchanged.
     """
+    # The model's stages are its modules layer1, layer2, ...
     named = [
-        (f"{stage_name}.{index}", block)
+        (f"stage{stage_name.removeprefix('layer')}.block{index + 1}", block)
         for stage_name, stage in model.named_children()
         if stage_name.startswith("layer")
         for index, block in enumerate(stage)
     ]
+    depth = weighted_layers(model)
     probes = []
     for index in pick(len(named), blocks):
         name, block = named[index]
-        probes.append(
-            Probe(name, block.bn1, "relu_input", block.conv1.weight, "conv1_weight")
-        )
+        probes.append(Probe(
+            f"{name}.layer{depth[block.conv1]}", block.bn1, "relu_input",
+            block.conv1.weight, "conv1_weight", block=index,
+        ))
     return probes
 
 
@@ -134,8 +159,8 @@ def transformer_probes(model: Transformer, blocks: Sequence[int] | None = None) 
             for norm_name, weight_name in SUBLAYER_WEIGHTS[side]:
                 weight = layer.get_submodule(weight_name).weight
                 probes.append(Probe(
-                    f"{side}.{index}.{norm_name}", getattr(layer, norm_name), "output",
-                    weight, weight_name.replace(".", "_") + "_weight", side=side,
+                    f"{side}.layer{index + 1}.{norm_name}", getattr(layer, norm_name), "output",
+                    weight, weight_name.replace(".", "_") + "_weight", side=side, block=index,
                 ))
     return probes
 

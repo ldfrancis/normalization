@@ -168,11 +168,10 @@ class NormIORecorder:
         """
         was_training = self.model.training
         state = {key: value.clone() for key, value in self.model.state_dict().items()}
-        names = positions(len({self.block_of(p) for p in self.probes}))
-        blocks = sorted({self.block_of(p) for p in self.probes}, key=self.block_order)
-        position_of = dict(zip(blocks, names))
+        blocks = sorted({p.block for p in self.probes})
+        position_of = dict(zip(blocks, positions(len(blocks))))
         self.records = {
-            p.name: LayerRecord(p.name, type(p.module).__name__, position_of[self.block_of(p)])
+            p.name: LayerRecord(p.name, type(p.module).__name__, position_of[p.block])
             for p in self.probes
         }
         try:
@@ -191,15 +190,6 @@ class NormIORecorder:
             self.model.load_state_dict(state)
             self.model.train(was_training)
         return self.examples
-
-    @staticmethod
-    def block_of(probe: Probe) -> str:
-        """``"layer2.4"`` -> ``"layer2.4"``; ``"encoder.3.norm2"`` -> ``"3"`` (the layer index)."""
-        return probe.name.split(".")[1] if probe.side else probe.name
-
-    @staticmethod
-    def block_order(block: str) -> tuple:
-        return tuple(int(part) if part.isdigit() else part for part in block.replace("layer", "").split("."))
 
     def remove(self) -> None:
         for handle in self.handles:

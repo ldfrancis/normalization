@@ -19,6 +19,7 @@ from nstudy.core import evaluator
 from nstudy.core.constants import PAD_ID
 from nstudy.core.model import Transformer, cifar_resnet, imagenet_resnet
 from nstudy.core.probes import (
+    weighted_layers,
     ProbeRecorder,
     default_blocks,
     percentiles,
@@ -46,7 +47,7 @@ def test_default_blocks_are_first_middle_and_last():
 def test_cifar_resnet_probes_watch_the_relu_input_and_conv1_of_three_blocks():
     model = cifar_resnet(56)  # 27 blocks: 9 per stage
     probes = resnet_probes(model)
-    assert [probe.name for probe in probes] == ["layer1.0", "layer2.4", "layer3.8"]
+    assert [probe.name for probe in probes] == ["stage1.block1.layer2", "stage2.block5.layer28", "stage3.block9.layer54"]
     blocks = [model.layer1[0], model.layer2[4], model.layer3[8]]
     for probe, block in zip(probes, blocks):
         assert probe.module is block.bn1  # its output is the ReLU's input
@@ -56,24 +57,24 @@ def test_cifar_resnet_probes_watch_the_relu_input_and_conv1_of_three_blocks():
 
 def test_imagenet_resnet_probes_span_the_stages():
     probes = resnet_probes(imagenet_resnet(50))  # 3 + 4 + 6 + 3 blocks
-    assert [probe.name for probe in probes] == ["layer1.0", "layer3.0", "layer4.2"]
+    assert [probe.name for probe in probes] == ["stage1.block1.layer2", "stage3.block1.layer23", "stage4.block3.layer47"]
 
 
 def test_probes_can_watch_chosen_blocks():
     probes = resnet_probes(cifar_resnet(20), blocks=[1, -1])
-    assert [probe.name for probe in probes] == ["layer1.1", "layer3.2"]
+    assert [probe.name for probe in probes] == ["stage1.block2.layer4", "stage3.block3.layer18"]
 
 
 def test_transformer_probes_watch_every_norm_of_three_encoder_and_decoder_layers():
     model = Transformer(50, d_model=16, num_heads=2, num_layers=6, d_ff=32)
     names = [probe.name for probe in transformer_probes(model)]
     assert names == [
-        "encoder.0.norm1", "encoder.0.norm2",
-        "encoder.2.norm1", "encoder.2.norm2",
-        "encoder.5.norm1", "encoder.5.norm2",
-        "decoder.0.norm1", "decoder.0.norm2", "decoder.0.norm3",
-        "decoder.2.norm1", "decoder.2.norm2", "decoder.2.norm3",
-        "decoder.5.norm1", "decoder.5.norm2", "decoder.5.norm3",
+        "encoder.layer1.norm1", "encoder.layer1.norm2",
+        "encoder.layer3.norm1", "encoder.layer3.norm2",
+        "encoder.layer6.norm1", "encoder.layer6.norm2",
+        "decoder.layer1.norm1", "decoder.layer1.norm2", "decoder.layer1.norm3",
+        "decoder.layer3.norm1", "decoder.layer3.norm2", "decoder.layer3.norm3",
+        "decoder.layer6.norm1", "decoder.layer6.norm2", "decoder.layer6.norm3",
     ]
     probes = transformer_probes(model)
     assert probes[0].module is model.encoder[0].norm1
@@ -81,11 +82,11 @@ def test_transformer_probes_watch_every_norm_of_three_encoder_and_decoder_layers
     # The last linear of the sub-layer each norm wraps.
     encoder, decoder = model.encoder[2], model.decoder[5]
     weights = {probe.name: (probe.weight, probe.weight_name) for probe in probes}
-    assert weights["encoder.2.norm1"] == (encoder.self_attn.out_proj.weight, "self_attn_out_proj_weight")
-    assert weights["encoder.2.norm2"] == (encoder.linear2.weight, "linear2_weight")
-    assert weights["decoder.5.norm1"] == (decoder.self_attn.out_proj.weight, "self_attn_out_proj_weight")
-    assert weights["decoder.5.norm2"] == (decoder.cross_attn.out_proj.weight, "cross_attn_out_proj_weight")
-    assert weights["decoder.5.norm3"] == (decoder.linear2.weight, "linear2_weight")
+    assert weights["encoder.layer3.norm1"] == (encoder.self_attn.out_proj.weight, "self_attn_out_proj_weight")
+    assert weights["encoder.layer3.norm2"] == (encoder.linear2.weight, "linear2_weight")
+    assert weights["decoder.layer6.norm1"] == (decoder.self_attn.out_proj.weight, "self_attn_out_proj_weight")
+    assert weights["decoder.layer6.norm2"] == (decoder.cross_attn.out_proj.weight, "cross_attn_out_proj_weight")
+    assert weights["decoder.layer6.norm3"] == (decoder.linear2.weight, "linear2_weight")
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +128,7 @@ def resnet_and_batch(seed: int = 0):
 
 def test_resnet_statistics_match_a_direct_computation():
     model, (images, labels) = resnet_and_batch()
-    blocks = lambda m: {"layer1.0": m.layer1[0], "layer2.1": m.layer2[1], "layer3.2": m.layer3[2]}  # noqa: E731
+    blocks = lambda m: {"stage1.block1.layer2": m.layer1[0], "stage2.block2.layer10": m.layer2[1], "stage3.block3.layer18": m.layer3[2]}  # noqa: E731
     expected, reference = reference_relu_inputs(model, images, labels, blocks)
 
     recorder = ProbeRecorder(model, resnet_probes(model), batch=(images, labels))
@@ -199,17 +200,17 @@ def test_transformer_statistics_leave_out_padding():
     }
     recorder = ProbeRecorder(model, transformer_probes(model), batch=batch)
     stats, histograms = recorder.run(evaluator.translation(), CPU)
-    assert sum(histograms["encoder.0.norm1/output"]["counts"]) == 6 * 16
-    assert sum(histograms["decoder.2.norm3/output"]["counts"]) == 5 * 16
-    assert {"encoder.0.norm1/output/rms", "encoder.0.norm1/output_grad/rms",
-            "encoder.0.norm1/output/l2", "encoder.0.norm1/output_grad/l2",
-            "decoder.1.norm2/output/p85"} <= set(stats)
+    assert sum(histograms["encoder.layer1.norm1/output"]["counts"]) == 6 * 16
+    assert sum(histograms["decoder.layer3.norm3/output"]["counts"]) == 5 * 16
+    assert {"encoder.layer1.norm1/output/rms", "encoder.layer1.norm1/output_grad/rms",
+            "encoder.layer1.norm1/output/l2", "encoder.layer1.norm1/output_grad/l2",
+            "decoder.layer2.norm2/output/p85"} <= set(stats)
     # Weights have no padding: all their elements are measured.
     weight = model.decoder[2].linear2.weight
-    assert sum(histograms["decoder.2.norm3/linear2_weight"]["counts"]) == weight.numel()
-    assert {"encoder.0.norm1/self_attn_out_proj_weight/l2",
-            "encoder.0.norm1/self_attn_out_proj_weight_grad/l2",
-            "decoder.1.norm2/cross_attn_out_proj_weight/rms"} <= set(stats)
+    assert sum(histograms["decoder.layer3.norm3/linear2_weight"]["counts"]) == weight.numel()
+    assert {"encoder.layer1.norm1/self_attn_out_proj_weight/l2",
+            "encoder.layer1.norm1/self_attn_out_proj_weight_grad/l2",
+            "decoder.layer2.norm2/cross_attn_out_proj_weight/rms"} <= set(stats)
 
 
 # ---------------------------------------------------------------------------
@@ -265,13 +266,13 @@ def test_trainer_records_probe_statistics_and_histograms_on_their_schedules(tmp_
     train_resnet(tmp_path, probes=True, logger=logger)
     probe_rows = [row for row in read_rows(tmp_path) if row["split"] == "probe"]
     assert [row["step"] for row in probe_rows] == [3, 6]
-    assert {"layer2.1/conv1_weight_grad/rms", "layer2.1/conv1_weight_grad/l2"} <= set(probe_rows[0])
+    assert {"stage2.block2.layer10/conv1_weight_grad/rms", "stage2.block2.layer10/conv1_weight_grad/l2"} <= set(probe_rows[0])
 
     histogram_rows = read_rows(tmp_path, "histograms.jsonl")
     assert [row["step"] for row in histogram_rows] == [2, 4, 6]
     assert set(histogram_rows[0]["histograms"]) == {
         f"{block}/{quantity}"
-        for block in ("layer1.0", "layer2.1", "layer3.2")
+        for block in ("stage1.block1.layer2", "stage2.block2.layer10", "stage3.block3.layer18")
         for quantity in ("relu_input", "conv1_weight")
     }
     assert [step for step, _ in logger.histograms] == [2, 4, 6]
@@ -305,3 +306,19 @@ def test_config_has_probe_settings():
     assert cfg.probe.blocks is None  # first, middle and last
     assert cfg.probe.stats_every == cfg.trainer.eval_every
     assert cfg.probe.histogram_every == cfg.trainer.eval_every
+
+
+@pytest.mark.parametrize("build, depth", [
+    *[(cifar_resnet, d) for d in (20, 32, 44, 56, 110)],
+    *[(imagenet_resnet, d) for d in (18, 34, 50, 101, 152)],
+])
+def test_weighted_layers_count_to_the_depth_of_every_resnet(build, depth):
+    """The stem conv is layer 1 and the final linear is layer ``depth``."""
+    model = build(depth)
+    layers = weighted_layers(model)
+    assert sorted(layers.values()) == list(range(1, depth + 1))
+    assert layers[model.conv1] == 1 and layers[model.fc] == depth
+    # Each probe is named after the depth of the conv whose weight it watches.
+    conv_of = {module.weight: module for module in layers}
+    for probe in resnet_probes(model):
+        assert probe.name.endswith(f".layer{layers[conv_of[probe.weight]]}")
