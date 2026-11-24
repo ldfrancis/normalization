@@ -4,9 +4,11 @@
 #   MODEL=resnet56 DATA=cifar10 ./scripts/baselines.sh                # 1 GPU
 #   MODEL=resnet110 DATA=cifar100 GPU=3 ./scripts/baselines.sh        # 1 GPU, the 4th one
 #   MODEL=resnet50 DATA=imagenet ./scripts/baselines.sh               # 8 GPUs
+#   MODEL=plain56 DATA=cifar10 ./scripts/baselines.sh                 # plain net, no shortcuts
 #   MODEL=transformer_base DATA=wmt14_en_de ./scripts/baselines.sh    # 8 GPUs
 #
 # MODEL: resnet20|32|44|56|110 (CIFAR), resnet18|34|50|101|152 (ImageNet),
+#        plain<depth> for the plain net of a ResNet depth (same layers, no shortcuts),
 #        transformer_base|transformer_big (WMT14)
 # DATA:  cifar10 | cifar100 | imagenet | wmt14_en_de
 # Optional: SEED (default 0), GPUS (default 1 for CIFAR, 8 otherwise),
@@ -27,18 +29,24 @@ set -euo pipefail
 SEED=${SEED:-0}
 
 overrides=()
+# A plain net trains with the settings of the ResNet of the same depth.
+if [[ "$MODEL" == plain* ]]; then
+  overrides+=("model.residual=false")
+fi
 case "$DATA:$MODEL" in
-  cifar10:resnet* | cifar100:resnet*)
+  cifar10:resnet* | cifar100:resnet* | cifar10:plain* | cifar100:plain*)
     experiment=${DATA}_resnet
     depth=${MODEL#resnet}
+    depth=${depth#plain}
     overrides+=("model.depth=$depth")
-    # He et al.: ResNet-110 starts at lr 0.01 for about 400 iterations.
+    # He et al.: ResNet-110 starts at lr 0.01 for about 400 iterations (plain-110 too).
     [[ "$depth" == 110 ]] && overrides+=("trainer.scheduler.warmup_steps=400")
     default_gpus=1
     ;;
-  imagenet:resnet*)
+  imagenet:resnet* | imagenet:plain*)
     experiment=imagenet_resnet
-    overrides+=("model.depth=${MODEL#resnet}")
+    depth=${MODEL#resnet}
+    overrides+=("model.depth=${depth#plain}")
     default_gpus=8
     ;;
   wmt14_en_de:transformer_base | wmt14_en_de:transformer_big)

@@ -381,3 +381,50 @@ def test_hydra_config_builds_the_requested_model(overrides, expected_params):
 def test_hydra_config_overrides_num_classes_for_cifar100():
     model = build_from_config(["model=cifar_resnet", "model.num_classes=100"])
     assert model.fc.out_features == 100
+
+
+# ---------------------------------------------------------------------------
+# Plain nets: the same layers without shortcuts
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("build, depth", [(cifar_resnet, 20), (cifar_resnet, 56),
+                                          (imagenet_resnet, 18), (imagenet_resnet, 50)])
+def test_plain_net_has_the_layers_of_the_resnet_and_no_shortcuts(build, depth):
+    resnet, plain = build(depth), build(depth, residual=False)
+    blocks = [m for m in plain.modules() if isinstance(m, (BasicBlock, Bottleneck))]
+    assert blocks and all(not b.residual and b.downsample is None for b in blocks)
+    # Every layer of the ResNet but its projection shortcuts (option B) is there, same shape.
+    shapes = {name: p.shape for name, p in resnet.named_parameters() if "downsample" not in name}
+    assert {name: p.shape for name, p in plain.named_parameters()} == shapes
+    out = plain(torch.randn(2, 3, 32, 32) if build is cifar_resnet else torch.randn(2, 3, 64, 64))
+    assert out.shape == (2, 10 if build is cifar_resnet else 1000)
+
+
+@pytest.mark.parametrize("block, in_channels, stride", [
+    (BasicBlock, 16, 1), (BasicBlock, 16, 2), (Bottleneck, 64, 1), (Bottleneck, 64, 2)])
+def test_plain_block_adds_nothing_back(block, in_channels, stride):
+    """A plain block is its residual block's output before the addition, then a ReLU."""
+    torch.manual_seed(0)
+    plain = block(in_channels, 16, stride, nn.BatchNorm2d, "B", residual=False).eval()
+    x = torch.randn(2, in_channels, 8, 8)
+    out = plain.relu(plain.bn1(plain.conv1(x)))
+    if block is Bottleneck:
+        out = plain.relu(plain.bn2(plain.conv2(out)))
+        out = plain.bn3(plain.conv3(out))
+    else:
+        out = plain.bn2(plain.conv2(out))
+    assert torch.equal(plain(x), torch.relu(out))
+
+
+def test_plain_nets_are_chosen_in_the_config():
+    hydra = pytest.importorskip("hydra")
+    from hydra.utils import instantiate
+
+    for experiment in ("cifar10_resnet", "imagenet_resnet"):
+        with hydra.initialize_config_dir(config_dir=str(CONFIG_DIR), version_base=None):
+            cfg = hydra.compose(config_name="config",
+                                overrides=[f"+experiment={experiment}", "model.residual=false"])
+        model = instantiate(cfg.model)
+        assert not model.residual and not any(
+            getattr(m, "residual", False) for m in model.modules())

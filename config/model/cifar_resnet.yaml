@@ -3,6 +3,8 @@ _target_: nstudy.core.model.cifar_resnet
 depth: 56
 num_classes: 10
 shortcut: A
+# false: the plain net of the same depth (no shortcut connections).
+residual: true
 norm_layer:
   _target_: torch.nn.BatchNorm2d
   _partial_: true

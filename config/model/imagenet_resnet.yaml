@@ -3,6 +3,8 @@ _target_: nstudy.core.model.imagenet_resnet
 depth: 50
 num_classes: 1000
 shortcut: B
+# false: the plain net of the same depth (no shortcut connections).
+residual: true
 # false: stride on the first 1x1 conv of a bottleneck (paper).
 # true: stride on the 3x3 conv (torchvision).
 stride_in_3x3: false

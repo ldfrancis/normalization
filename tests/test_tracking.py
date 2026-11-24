@@ -299,3 +299,12 @@ def test_transformer_sublayer_weights_get_their_training_gradient_norms(tmp_path
     for key, values in norms.items():
         assert row[f"{key}_grad_norm"] == pytest.approx(values[-1], rel=1e-5)
         assert row[f"{key}_grad_norm_mean"] == pytest.approx(sum(values) / 2, rel=1e-5)
+
+
+def test_plain_nets_are_tagged():
+    hydra = pytest.importorskip("hydra")
+    with hydra.initialize_config_dir(config_dir=str(CONFIG_DIR), version_base=None):
+        cfg = hydra.compose(config_name="config",
+                            overrides=["+experiment=cifar10_resnet", "model.residual=false"])
+    choices = {"model": "cifar_resnet", "data": "cifar10"}
+    assert run_tags(cfg, choices) == ["cifar10", "cifar_resnet", "plain", "BatchNorm2d"]

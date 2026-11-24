@@ -5,6 +5,9 @@ ResNets from He et al., "Deep Residual Learning for Image Recognition" (2016):
 * ``cifar_resnet(depth)``: the 6n+2 networks of Section 4.2 (ResNet-20/32/44/56/110).
 * ``imagenet_resnet(depth)``: the networks of Table 1 (ResNet-18/34/50/101/152).
 
+Both take ``residual=False`` for the plain nets of the same depth: the same
+layers without shortcut connections (Sections 3.3, 4.1 and 4.2).
+
 The Transformer from Vaswani et al., "Attention Is All You Need" (2017):
 
 * ``Transformer(vocab_size)``: the base model by default; Table 3 gives the big one.
@@ -60,33 +63,42 @@ def make_shortcut(
 
 
 class BasicBlock(nn.Module):
-    """Two 3x3 convs (Figure 5, left)."""
+    """Two 3x3 convs (Figure 5, left).
+
+    ``residual=False`` gives the block of a plain net (Figure 3, middle): the
+    same layers with no shortcut, so nothing is added back before the last ReLU.
+    """
 
     expansion = 1
 
     def __init__(
-        self, in_channels: int, width: int, stride: int, norm_layer: NormLayer, shortcut: str
+        self, in_channels: int, width: int, stride: int, norm_layer: NormLayer, shortcut: str,
+        residual: bool = True,
     ) -> None:
         super().__init__()
+        self.residual = residual
         self.conv1 = conv3x3(in_channels, width, stride)
         self.bn1 = norm_layer(width)
         self.conv2 = conv3x3(width, width)
         self.bn2 = norm_layer(width)
         self.relu = nn.ReLU(inplace=True)
-        self.downsample = make_shortcut(shortcut, in_channels, width, stride, norm_layer)
+        self.downsample = (make_shortcut(shortcut, in_channels, width, stride, norm_layer)
+                           if residual else None)
 
     def forward(self, x: Tensor) -> Tensor:
-        identity = x if self.downsample is None else self.downsample(x)
         out = self.relu(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
-        return self.relu(out + identity)
+        if self.residual:
+            out = out + (x if self.downsample is None else self.downsample(x))
+        return self.relu(out)
 
 
 class Bottleneck(nn.Module):
     """1x1, 3x3, 1x1 convs with a 4x wider output (Figure 5, right).
 
     The paper puts the stride on the first 1x1 conv. ``stride_in_3x3=True``
-    moves it to the 3x3 conv, which is what torchvision does.
+    moves it to the 3x3 conv, which is what torchvision does. ``residual=False``
+    drops the shortcut, as in ``BasicBlock``.
     """
 
     expansion = 4
@@ -98,9 +110,11 @@ class Bottleneck(nn.Module):
         stride: int,
         norm_layer: NormLayer,
         shortcut: str,
+        residual: bool = True,
         stride_in_3x3: bool = False,
     ) -> None:
         super().__init__()
+        self.residual = residual
         out_channels = width * self.expansion
         stride_1x1, stride_3x3 = (1, stride) if stride_in_3x3 else (stride, 1)
         self.conv1 = conv1x1(in_channels, width, stride_1x1)
@@ -110,14 +124,16 @@ class Bottleneck(nn.Module):
         self.conv3 = conv1x1(width, out_channels)
         self.bn3 = norm_layer(out_channels)
         self.relu = nn.ReLU(inplace=True)
-        self.downsample = make_shortcut(shortcut, in_channels, out_channels, stride, norm_layer)
+        self.downsample = (make_shortcut(shortcut, in_channels, out_channels, stride, norm_layer)
+                           if residual else None)
 
     def forward(self, x: Tensor) -> Tensor:
-        identity = x if self.downsample is None else self.downsample(x)
         out = self.relu(self.bn1(self.conv1(x)))
         out = self.relu(self.bn2(self.conv2(out)))
         out = self.bn3(self.conv3(out))
-        return self.relu(out + identity)
+        if self.residual:
+            out = out + (x if self.downsample is None else self.downsample(x))
+        return self.relu(out)
 
 
 class ResNet(nn.Module):
@@ -134,6 +150,7 @@ class ResNet(nn.Module):
         stem: ``"cifar"`` (3x3 conv) or ``"imagenet"`` (7x7 stride-2 conv + max pool).
         shortcut: ``"A"`` (zero padding) or ``"B"`` (1x1 projection) where shapes change.
         norm_layer: callable mapping a channel count to a normalization module.
+        residual: False builds the plain net of the same depth (no shortcuts).
         block_kwargs: extra keyword arguments passed to every block.
     """
 
@@ -146,9 +163,11 @@ class ResNet(nn.Module):
         stem: str,
         shortcut: str,
         norm_layer: NormLayer = nn.BatchNorm2d,
+        residual: bool = True,
         block_kwargs: dict | None = None,
     ) -> None:
         super().__init__()
+        self.residual = residual
         if len(blocks_per_stage) != len(widths):
             raise ValueError("blocks_per_stage and widths must have the same length")
         block_kwargs = block_kwargs or {}
@@ -172,7 +191,8 @@ class ResNet(nn.Module):
                 # Every stage after the first halves the resolution in its first block.
                 stride = 2 if index > 0 and block_index == 0 else 1
                 blocks.append(
-                    block(in_channels, width, stride, norm_layer, shortcut, **block_kwargs)
+                    block(in_channels, width, stride, norm_layer, shortcut,
+                          residual=residual, **block_kwargs)
                 )
                 in_channels = width * block.expansion
             name = f"layer{index + 1}"
@@ -230,8 +250,12 @@ def cifar_resnet(
     num_classes: int = 10,
     norm_layer: NormLayer = nn.BatchNorm2d,
     shortcut: str = "A",
+    residual: bool = True,
 ) -> ResNet:
-    """ResNet-``depth`` for 32x32 inputs, with ``depth = 6n + 2`` (Section 4.2)."""
+    """ResNet-``depth`` for 32x32 inputs, with ``depth = 6n + 2`` (Section 4.2).
+
+    ``residual=False``: the plain net of the same depth (Figure 6, left).
+    """
     if depth < 8 or (depth - 2) % 6 != 0:
         raise ValueError(f"CIFAR ResNet depth must be 6n+2 with n >= 1, got {depth}")
     n = (depth - 2) // 6
@@ -243,6 +267,7 @@ def cifar_resnet(
         stem="cifar",
         shortcut=shortcut,
         norm_layer=norm_layer,
+        residual=residual,
     )
 
 
@@ -252,8 +277,12 @@ def imagenet_resnet(
     norm_layer: NormLayer = nn.BatchNorm2d,
     shortcut: str = "B",
     stride_in_3x3: bool = False,
+    residual: bool = True,
 ) -> ResNet:
-    """ResNet-``depth`` for 224x224 inputs, with depth in {18, 34, 50, 101, 152} (Table 1)."""
+    """ResNet-``depth`` for 224x224 inputs, with depth in {18, 34, 50, 101, 152} (Table 1).
+
+    ``residual=False``: the plain net of the same depth (Figure 4, left, for 18 and 34).
+    """
     if depth not in IMAGENET_ARCHITECTURES:
         raise ValueError(
             f"ImageNet ResNet depth must be one of {sorted(IMAGENET_ARCHITECTURES)}, got {depth}"
@@ -267,6 +296,7 @@ def imagenet_resnet(
         stem="imagenet",
         shortcut=shortcut,
         norm_layer=norm_layer,
+        residual=residual,
         block_kwargs={"stride_in_3x3": stride_in_3x3} if block is Bottleneck else None,
     )
 

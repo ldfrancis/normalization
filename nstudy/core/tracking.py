@@ -33,8 +33,11 @@ def to_wandb(row: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def run_tags(cfg: Any, choices: Mapping[str, Any]) -> list[str]:
-    """Tags to filter runs by: the dataset, the model config and the normalization layer."""
+    """Tags to filter runs by: the dataset, the model config, ``plain`` for nets without
+    shortcuts, and the normalization layer."""
     tags = [str(choices[group]) for group in ("data", "model") if choices.get(group)]
+    if cfg.model.get("residual") is False:
+        tags.append("plain")
     norm_layer = cfg.model.get("norm_layer")
     if norm_layer is not None and "_target_" in norm_layer:
         tags.append(str(norm_layer["_target_"]).rsplit(".", 1)[-1])
