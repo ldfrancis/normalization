@@ -401,6 +401,17 @@ def test_plain_net_has_the_layers_of_the_resnet_and_no_shortcuts(build, depth):
     assert out.shape == (2, 10 if build is cifar_resnet else 1000)
 
 
+@pytest.mark.parametrize("build, depth", [(cifar_resnet, 56), (imagenet_resnet, 34)])
+def test_plain_net_convs_use_kaiming_init(build, depth):
+    """Plain nets get the same He et al. (2015) init as the ResNets: std sqrt(2 / fan_out)."""
+    torch.manual_seed(0)
+    convs = [m for m in build(depth, residual=False).modules() if isinstance(m, nn.Conv2d)]
+    assert convs
+    for conv in convs:
+        fan_out = conv.out_channels * conv.kernel_size[0] * conv.kernel_size[1]
+        assert conv.weight.std().item() == pytest.approx((2 / fan_out) ** 0.5, rel=0.1)
+
+
 @pytest.mark.parametrize("block, in_channels, stride", [
     (BasicBlock, 16, 1), (BasicBlock, 16, 2), (Bottleneck, 64, 1), (Bottleneck, 64, 2)])
 def test_plain_block_adds_nothing_back(block, in_channels, stride):

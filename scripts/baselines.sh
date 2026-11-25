@@ -13,7 +13,7 @@
 # DATA:  cifar10 | cifar100 | imagenet | wmt14_en_de
 # Optional: SEED (default 0), GPUS (default 1 for CIFAR, 8 otherwise),
 #           GPU (which GPU a single-GPU run uses, default 0),
-#           NORM (replaces the model's norm layers: dyt|dysoftsign|none|batchnorm|layernorm,
+#           NORM (replaces the model's norm layers: dyt|dysoftsign|none|batchnorm|layernorm|layernorm2d,
 #                 see config/norm/; default: the model's own),
 #           OUT (run directory, default outputs/baselines/<data>_<model>[_<norm>]_seed<seed>).
 #

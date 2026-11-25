@@ -140,3 +140,15 @@ class DynamicScale(ElementwiseNorm):
 
     def squash(self, x: Tensor, alpha: Tensor) -> Tensor:
         return alpha * x
+
+class LayerNorm2d(nn.GroupNorm):
+    """LayerNorm for conv feature maps: each image normalized over (C, H, W).
+
+    The LayerNorm of Ba et al. (2016) as used for CNNs in Wu & He, "Group
+    Normalization" (2018): ``GroupNorm`` with one group, so a per-channel
+    ``weight`` and ``bias`` as in BatchNorm. ``nn.LayerNorm(C)`` would normalize
+    only the last axis (width) of an (N, C, H, W) input.
+    """
+
+    def __init__(self, num_features: int, eps: float = 1e-5, affine: bool = True) -> None:
+        super().__init__(1, num_features, eps=eps, affine=affine)

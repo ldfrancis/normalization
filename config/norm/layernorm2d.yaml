@@ -1,0 +1,5 @@
+# @package model.norm_layer
+# LayerNorm for ResNets: each image normalized over (C, H, W), i.e. GroupNorm with one group
+# (nstudy/core/norms.py). config/norm/layernorm.yaml is the Transformer's (last axis only).
+_target_: nstudy.core.norms.LayerNorm2d
+_partial_: true

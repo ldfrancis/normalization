@@ -2,7 +2,8 @@ defaults:
   - model: cifar_resnet
   - data: cifar10
   - trainer: cifar_resnet
-  # Replaces the model's normalization layers: dyt, dysoftsign, none, batchnorm, layernorm
+  # Replaces the model's normalization layers: dyt, dysoftsign, none, batchnorm, layernorm,
+  # layernorm2d (ResNets: LayerNorm over C, H, W)
   # (config/norm/). null keeps the model's own (BatchNorm2d for ResNets, LayerNorm for
   # the Transformer).
   - norm: null

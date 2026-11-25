@@ -9,7 +9,8 @@ from torch import nn
 
 from nstudy.core import evaluator, norm_io
 from nstudy.core.model import Transformer, cifar_resnet, imagenet_resnet
-from nstudy.core.norms import DynamicScale, DynamicSoftsign, DynamicTanh, ElementwiseNorm
+from nstudy.core.norms import (DynamicScale, DynamicSoftsign, DynamicTanh, ElementwiseNorm,
+                               LayerNorm2d)
 from nstudy.core.probes import model_probes
 from nstudy.core.tracking import run_tags
 
@@ -170,21 +171,24 @@ def test_models_train_with_each_replacement(norm):
     assert logits.shape == (2, 3, 30) and torch.isfinite(logits).all()
 
 
-@pytest.mark.parametrize("norm", ["dyt", "dysoftsign", "dyscale", "none", "batchnorm", "layernorm"])
+@pytest.mark.parametrize("norm", ["dyt", "dysoftsign", "dyscale", "none", "batchnorm", "layernorm",
+                                  "layernorm2d"])
 @pytest.mark.parametrize("experiment", ["cifar10_resnet", "wmt14_transformer_base"])
 def test_norm_option_replaces_the_norm_layer_of_any_experiment(norm, experiment):
     hydra = pytest.importorskip("hydra")
     from hydra.utils import instantiate
 
     if (norm, experiment) in {("batchnorm", "wmt14_transformer_base"),
+                              ("layernorm2d", "wmt14_transformer_base"),
                               ("layernorm", "cifar10_resnet")}:
-        pytest.skip("BatchNorm2d needs images; LayerNorm here normalizes tokens")
+        pytest.skip("BatchNorm2d and LayerNorm2d need images; LayerNorm here normalizes tokens")
     with hydra.initialize_config_dir(config_dir=str(CONFIG_DIR), version_base=None):
         cfg = hydra.compose(config_name="config", overrides=[f"+experiment={experiment}",
                                                              f"norm={norm}"])
     expected = {"dyt": DynamicTanh, "dysoftsign": DynamicSoftsign, "dyscale": DynamicScale,
                 "none": nn.Identity,
-                "batchnorm": nn.BatchNorm2d, "layernorm": nn.LayerNorm}[norm]
+                "batchnorm": nn.BatchNorm2d, "layernorm": nn.LayerNorm,
+                "layernorm2d": LayerNorm2d}[norm]
     layer = instantiate(cfg.model.norm_layer)(16)
     assert type(layer) is expected
     assert run_tags(cfg, {})[-1] == expected.__name__
@@ -260,3 +264,15 @@ def test_norm_io_on_a_transformer_with_softsign_and_on_no_norm():
     for (name, points), width in zip(layers.items(), (16, 32, 64)):
         assert torch.equal(points["x_hat"], points["x"]) and torch.equal(points["y"], points["x"])
         assert points["channel"].max().item() == width - 1, name  # channels on axis 1
+
+
+def test_layernorm2d_normalizes_each_image_over_channels_and_positions():
+    torch.manual_seed(0)
+    x = torch.randn(4, 16, 8, 8) * 3 + 2
+    out = LayerNorm2d(16)(x)
+    flat = out.flatten(1)
+    assert torch.allclose(flat.mean(1), torch.zeros(4), atol=1e-5)
+    assert torch.allclose(flat.var(1, unbiased=False), torch.ones(4), atol=1e-3)
+    assert LayerNorm2d(16).weight.shape == (16,)
+    plain = cifar_resnet(20, norm_layer=LayerNorm2d, residual=False)
+    assert plain(torch.randn(2, 3, 32, 32)).shape == (2, 10)
