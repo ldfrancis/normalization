@@ -48,6 +48,10 @@ class ElementwiseNorm(nn.Module):
         bias: learn the shift ``beta``. Without it, a ResNet's convs (built
             without biases, as BatchNorm's ``beta`` stands in for them) have no
             bias at all.
+        dropout: probability of zeroing each element of the output (after
+            ``gamma`` and ``beta``) in training, as regularization; 0 for none.
+        dropout_channels: zero whole channels of an image instead of single
+            elements (``nn.Dropout2d``), for conv feature maps (4-D inputs) only.
     """
 
     def __init__(
@@ -57,6 +61,8 @@ class ElementwiseNorm(nn.Module):
         per_channel_alpha: bool = False,
         channel_dim: int | None = None,
         bias: bool = True,
+        dropout: float = 0.0,
+        dropout_channels: bool = False,
     ) -> None:
         super().__init__()
         self.num_features = num_features
@@ -64,6 +70,12 @@ class ElementwiseNorm(nn.Module):
         self.alpha = nn.Parameter(torch.full((num_features if per_channel_alpha else 1,), float(alpha_init)))
         self.weight = nn.Parameter(torch.ones(num_features))
         self.bias = nn.Parameter(torch.zeros(num_features)) if bias else None
+        # No parameters or buffers: checkpoints load with any dropout.
+        self.dropout_channels = dropout_channels
+        if dropout == 0:
+            self.dropout = nn.Identity()
+        else:
+            self.dropout = nn.Dropout2d(dropout) if dropout_channels else nn.Dropout(dropout)
 
     def squash(self, x: Tensor, alpha: Tensor) -> Tensor:
         raise NotImplementedError
@@ -82,7 +94,11 @@ class ElementwiseNorm(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         out = self.squash(x, self.per_channel(self.alpha, x)) * self.per_channel(self.weight, x)
-        return out if self.bias is None else out + self.per_channel(self.bias, x)
+        if self.bias is not None:
+            out = out + self.per_channel(self.bias, x)
+        if self.dropout_channels and out.dim() != 4:
+            raise ValueError("dropout_channels needs (batch, channels, height, width) inputs")
+        return self.dropout(out)
 
     def extra_repr(self) -> str:
         return (f"{self.num_features}, alpha={self.alpha.numel()} value(s), "

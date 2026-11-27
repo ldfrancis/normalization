@@ -289,3 +289,59 @@ def test_dyt_channel_option_learns_one_alpha_per_channel():
     layer = instantiate(channel.model.norm_layer)(16)
     assert layer.alpha.shape == layer.weight.shape == layer.bias.shape == (16,)
     assert torch.all(layer.alpha == 0.5)
+
+
+def test_dyt_dropout_acts_on_the_output_in_training_only():
+    torch.manual_seed(0)
+    plain, dropped = DynamicTanh(16), DynamicTanh(16, dropout=0.3)
+    dropped.load_state_dict(plain.state_dict())  # no new parameters or buffers
+    with torch.no_grad():
+        plain.bias.fill_(0.5)
+        dropped.bias.fill_(0.5)
+    x = torch.randn(64, 16, 8, 8)
+    assert torch.equal(dropped.eval()(x), plain.eval()(x))
+    out, reference = dropped.train()(x), plain(x)
+    zeroed = out == 0
+    assert 0.27 < zeroed.float().mean().item() < 0.33  # beta is zeroed too: after the shift
+    assert torch.allclose(out[~zeroed], reference[~zeroed] / 0.7)
+
+
+def test_dropout_option_reaches_the_dyt_layers():
+    hydra = pytest.importorskip("hydra")
+    from hydra.utils import instantiate
+
+    with hydra.initialize_config_dir(config_dir=str(CONFIG_DIR), version_base=None):
+        default = hydra.compose(config_name="config", overrides=[
+            "+experiment=cifar10_resnet", "norm=dyt_channel"])
+        dropped = hydra.compose(config_name="config", overrides=[
+            "+experiment=cifar10_resnet", "norm=dyt_channel", "model.norm_layer.dropout=0.1"])
+    assert isinstance(instantiate(default.model.norm_layer)(16).dropout, nn.Identity)
+    layer = instantiate(dropped.model.norm_layer)(16)
+    assert isinstance(layer.dropout, nn.Dropout) and layer.dropout.p == 0.1
+    assert layer.alpha.shape == (16,)
+
+
+def test_dyt_channel_dropout_zeroes_whole_channels():
+    torch.manual_seed(0)
+    plain, dropped = DynamicTanh(64), DynamicTanh(64, dropout=0.25, dropout_channels=True)
+    x = torch.randn(32, 64, 8, 8)
+    assert torch.equal(dropped.eval()(x), plain.eval()(x))
+    out, reference = dropped.train()(x), plain(x)
+    zeroed = (out == 0).all(dim=(2, 3))  # (image, channel) maps that are all zero
+    assert 0.2 < zeroed.float().mean().item() < 0.3
+    kept = ~zeroed
+    assert torch.allclose(out[kept], reference[kept] / 0.75)
+    with pytest.raises(ValueError, match="dropout_channels"):
+        dropped.train()(torch.randn(2, 5, 64))  # Transformer tokens
+
+
+def test_channel_dropout_option_reaches_the_dyt_layers():
+    hydra = pytest.importorskip("hydra")
+    from hydra.utils import instantiate
+
+    with hydra.initialize_config_dir(config_dir=str(CONFIG_DIR), version_base=None):
+        cfg = hydra.compose(config_name="config", overrides=[
+            "+experiment=cifar10_resnet", "norm=dyt_channel", "model.norm_layer.dropout=0.05",
+            "model.norm_layer.dropout_channels=true"])
+    layer = instantiate(cfg.model.norm_layer)(16)
+    assert isinstance(layer.dropout, nn.Dropout2d) and layer.dropout.p == 0.05

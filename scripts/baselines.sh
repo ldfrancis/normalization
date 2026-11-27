@@ -18,7 +18,9 @@
 #           FIRST_LAYER_LR_MULT (ResNets: multiplier of the learning rate for layer 1,
 #                     rising linearly with depth to 1 at the last layer; e.g. 0.1.
 #                     Default: one rate for all layers),
-#           OUT (run directory, default outputs/baselines/<data>_<model>[_<norm>][_lrmult<m>]_seed<seed>).
+#           DROPOUT (NORM=dyt|dyt_channel: dropout on the norm's output, e.g. 0.1),
+#           DROPOUT_CHANNELS (as DROPOUT, but zeroing whole channels: Dropout2d; ResNets),
+#           OUT (run directory, default outputs/baselines/<data>_<model>[_<norm>][_lrmult<m>][_drop<p>|_drop2d<p>]_seed<seed>).
 #
 #   MODEL=resnet56 DATA=cifar10 NORM=dyt ./scripts/baselines.sh
 #
@@ -63,8 +65,13 @@ case "$DATA:$MODEL" in
 esac
 
 GPUS=${GPUS:-$default_gpus}
-setting=${DATA}_${MODEL}${NORM:+_$NORM}${FIRST_LAYER_LR_MULT:+_lrmult$FIRST_LAYER_LR_MULT}
+setting=${DATA}_${MODEL}${NORM:+_$NORM}${FIRST_LAYER_LR_MULT:+_lrmult$FIRST_LAYER_LR_MULT}${DROPOUT:+_drop$DROPOUT}${DROPOUT_CHANNELS:+_drop2d$DROPOUT_CHANNELS}
 [[ -n "${NORM:-}" ]] && overrides+=("norm=$NORM")
+[[ -n "${DROPOUT:-}" ]] && overrides+=("model.norm_layer.dropout=$DROPOUT")
+if [[ -n "${DROPOUT_CHANNELS:-}" ]]; then
+  [[ -n "${DROPOUT:-}" ]] && { echo "set DROPOUT or DROPOUT_CHANNELS, not both" >&2; exit 1; }
+  overrides+=("model.norm_layer.dropout=$DROPOUT_CHANNELS" "model.norm_layer.dropout_channels=true")
+fi
 [[ -n "${FIRST_LAYER_LR_MULT:-}" ]] &&
   overrides+=("trainer.first_layer_lr_multiplier=$FIRST_LAYER_LR_MULT")
 OUT=${OUT:-outputs/baselines/${setting}_seed${SEED}}

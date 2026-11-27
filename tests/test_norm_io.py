@@ -134,3 +134,19 @@ def test_config_needs_only_the_run_directory():
         cfg = hydra.compose(config_name="norm_io", overrides=["run_dir=outputs/x"])
     assert (cfg.split, cfg.mode, cfg.examples) == ("val", "eval", 512)
     assert cfg.mode in norm_io.MODES
+
+
+@pytest.mark.parametrize("mode", ["eval", "train"])
+def test_dyt_dropout_does_not_reach_the_recorded_points(mode):
+    from nstudy.core.norms import DynamicTanh
+
+    torch.manual_seed(0)
+    model = cifar_resnet(8, norm_layer=partial(DynamicTanh, dropout=0.5))
+    recorder = norm_io.NormIORecorder(model, model_probes(model), 10_000, mode=mode)
+    recorder.run([(torch.randn(8, 3, 32, 32), torch.zeros(8, dtype=torch.long))],
+                 evaluator.classification(), torch.device("cpu"), 8)
+    recorder.remove()
+    for probe in recorder.probes:
+        points = recorder.records[probe.name].tensors()
+        assert torch.allclose(points["x_hat"], torch.tanh(probe.module.alpha * points["x"]))
+        assert (points["y"] != 0).float().mean() > 0.99
