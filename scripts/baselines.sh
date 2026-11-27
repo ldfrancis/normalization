@@ -18,7 +18,7 @@
 #           FIRST_LAYER_LR_MULT (ResNets: multiplier of the learning rate for layer 1,
 #                     rising linearly with depth to 1 at the last layer; e.g. 0.1.
 #                     Default: one rate for all layers),
-#           DROPOUT (NORM=dyt|dyt_channel: dropout on the norm's output, e.g. 0.1),
+#           DROPOUT (NORM=dyt|dyt_channel|dysoftsign|dyscale: dropout on the norm's output, e.g. 0.1),
 #           DROPOUT_CHANNELS (as DROPOUT, but zeroing whole channels: Dropout2d; ResNets),
 #           OUT (run directory, default outputs/baselines/<data>_<model>[_<norm>][_lrmult<m>][_drop<p>|_drop2d<p>]_seed<seed>).
 #

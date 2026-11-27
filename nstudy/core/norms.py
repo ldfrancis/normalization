@@ -5,10 +5,10 @@ own, with no statistics over the batch or the features:
 
 * ``DynamicTanh``: ``f = tanh(alpha * x)`` (DyT; Zhu et al., "Transformers
   without Normalization", 2025).
-* ``DynamicSoftsign``: ``f = x / (|alpha| + |x|)``, that is ``softsign(x / alpha)``.
-  Its slope at 0 is ``1 / alpha`` (``alpha`` for tanh), so ``alpha = 2`` starts
-  with the slope of DyT's ``alpha = 0.5``. ``|alpha|`` keeps the denominator
-  positive if training pushes ``alpha`` below 0.
+* ``DynamicSoftsign``: ``f = softsign(alpha * x) = alpha * x / (1 + |alpha * x|)``,
+  DyT with softsign in place of tanh: the same slope ``alpha`` at 0 and limits
+  of +-1, but reached polynomially (``1 - 1 / |alpha * x|``) rather than
+  exponentially, so large inputs are squashed less.
 * ``DynamicScale``: ``f = alpha * x``, with ``alpha`` starting at ``1 / sqrt(d)``
   (``d_model`` in the Transformer, the fan-in of the conv before the norm in a
   ResNet).
@@ -113,13 +113,10 @@ class DynamicTanh(ElementwiseNorm):
 
 
 class DynamicSoftsign(ElementwiseNorm):
-    """``gamma * x / (|alpha| + |x|) + beta`` (``alpha`` starts at 2: slope 0.5 at 0)."""
-
-    def __init__(self, num_features: int, alpha_init: float = 2.0, **kwargs) -> None:
-        super().__init__(num_features, alpha_init=alpha_init, **kwargs)
+    """``gamma * softsign(alpha * x) + beta`` (``alpha`` starts at 0.5, as DyT)."""
 
     def squash(self, x: Tensor, alpha: Tensor) -> Tensor:
-        return x / (alpha.abs() + x.abs())
+        return nn.functional.softsign(alpha * x)
 
 
 class DynamicScale(ElementwiseNorm):

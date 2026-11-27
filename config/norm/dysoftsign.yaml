@@ -1,8 +1,13 @@
 # @package model.norm_layer
-# gamma * x / (|alpha| + |x|) + beta (nstudy/core/norms.py). alpha_init 2: slope 0.5 at 0, as DyT.
+# gamma * softsign(alpha * x) + beta, softsign(z) = z / (1 + |z|) (nstudy/core/norms.py).
+# DyT with softsign in place of tanh; alpha_init 0.5 as DyT (slope 0.5 at 0).
 _target_: nstudy.core.norms.DynamicSoftsign
 _partial_: true
-alpha_init: 2.0
+alpha_init: 0.5
 per_channel_alpha: false
 # false drops beta; a ResNet's convs then have no bias at all.
 bias: true
+# Dropout on the layer's output (after gamma and beta) in training; 0 for none.
+dropout: 0.0
+# true: drop whole channels of an image (Dropout2d) instead of single elements; ResNets only.
+dropout_channels: false

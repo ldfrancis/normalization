@@ -41,10 +41,12 @@ def test_dynamic_tanh_on_tokens_scales_and_shifts_along_features():
 def test_dynamic_softsign_matches_its_formula():
     layer = randomized(DynamicSoftsign(4))
     x = torch.randn(2, 5, 4) * 3
-    assert torch.allclose(layer(x), layer.weight * x / (2.0 + x.abs()) + layer.bias)
+    z = 0.5 * x
+    assert torch.allclose(layer(x), layer.weight * z / (1 + z.abs()) + layer.bias)
     with torch.no_grad():
-        layer.alpha.fill_(-2.0)  # |alpha|: the denominator stays positive
-    assert torch.allclose(layer(x), layer.weight * x / (2.0 + x.abs()) + layer.bias)
+        layer.alpha.fill_(3.0)  # alpha multiplies, as in DyT
+    z = 3.0 * x
+    assert torch.allclose(layer(x), layer.weight * z / (1 + z.abs()) + layer.bias)
 
 
 def test_softsign_default_starts_with_the_slope_of_dyt():
@@ -345,3 +347,20 @@ def test_channel_dropout_option_reaches_the_dyt_layers():
             "model.norm_layer.dropout_channels=true"])
     layer = instantiate(cfg.model.norm_layer)(16)
     assert isinstance(layer.dropout, nn.Dropout2d) and layer.dropout.p == 0.05
+
+
+@pytest.mark.parametrize("norm, cls", [("dyt", DynamicTanh), ("dysoftsign", DynamicSoftsign),
+                                       ("dyscale", DynamicScale)])
+@pytest.mark.parametrize("channels", [False, True])
+def test_every_elementwise_norm_takes_both_dropouts(norm, cls, channels):
+    hydra = pytest.importorskip("hydra")
+    from hydra.utils import instantiate
+
+    with hydra.initialize_config_dir(config_dir=str(CONFIG_DIR), version_base=None):
+        cfg = hydra.compose(config_name="config", overrides=[
+            "+experiment=cifar10_resnet", f"norm={norm}", "model.norm_layer.dropout=0.1",
+            f"model.norm_layer.dropout_channels={str(channels).lower()}"])
+    layer = instantiate(cfg.model.norm_layer)(16)
+    assert type(layer) is cls
+    assert type(layer.dropout) is (nn.Dropout2d if channels else nn.Dropout)
+    assert layer.dropout.p == 0.1
