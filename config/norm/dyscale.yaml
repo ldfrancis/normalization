@@ -6,9 +6,14 @@ _target_: nstudy.core.norms.DynamicScale
 _partial_: true
 alpha_init: null
 per_channel_alpha: false
+# false: no alpha (fixed at 1); gamma starts at 1 / sqrt(d) instead: gamma * x + beta.
+learn_alpha: true
 # false drops beta; a ResNet's convs then have no bias at all.
 bias: true
 # Dropout on the layer's output (after gamma and beta) in training; 0 for none.
 dropout: 0.0
 # true: drop whole channels of an image (Dropout2d) instead of single elements; ResNets only.
 dropout_channels: false
+# true: gamma * R f(x) + beta, R a fixed randomized Hadamard rotation mixing the channels
+# (drawn from the run's seed, not trained). Channels must be a power of 2.
+hadamard: false

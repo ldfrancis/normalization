@@ -20,7 +20,11 @@
 #                     Default: one rate for all layers),
 #           DROPOUT (NORM=dyt|dyt_channel|dysoftsign|dyscale: dropout on the norm's output, e.g. 0.1),
 #           DROPOUT_CHANNELS (as DROPOUT, but zeroing whole channels: Dropout2d; ResNets),
-#           OUT (run directory, default outputs/baselines/<data>_<model>[_<norm>][_lrmult<m>][_drop<p>|_drop2d<p>]_seed<seed>).
+#           HADAMARD (set to 1, NORM=dyt|dyt_channel|dysoftsign|dyscale: a fixed randomized
+#                     Hadamard rotation of the channels before gamma and beta),
+#           FIXED_ALPHA (set to 1, NORM=dyt|dyt_channel|dysoftsign: alpha stays at its initial
+#                     value; NORM=dyscale: no alpha, gamma starts at 1/sqrt(fan-in) instead),
+#           OUT (run directory, default outputs/baselines/<data>_<model>[_<norm>][_lrmult<m>][_drop<p>|_drop2d<p>][_hadamard][_fixedalpha]_seed<seed>).
 #
 #   MODEL=resnet56 DATA=cifar10 NORM=dyt ./scripts/baselines.sh
 #
@@ -65,13 +69,15 @@ case "$DATA:$MODEL" in
 esac
 
 GPUS=${GPUS:-$default_gpus}
-setting=${DATA}_${MODEL}${NORM:+_$NORM}${FIRST_LAYER_LR_MULT:+_lrmult$FIRST_LAYER_LR_MULT}${DROPOUT:+_drop$DROPOUT}${DROPOUT_CHANNELS:+_drop2d$DROPOUT_CHANNELS}
+setting=${DATA}_${MODEL}${NORM:+_$NORM}${FIRST_LAYER_LR_MULT:+_lrmult$FIRST_LAYER_LR_MULT}${DROPOUT:+_drop$DROPOUT}${DROPOUT_CHANNELS:+_drop2d$DROPOUT_CHANNELS}${HADAMARD:+_hadamard}${FIXED_ALPHA:+_fixedalpha}
 [[ -n "${NORM:-}" ]] && overrides+=("norm=$NORM")
 [[ -n "${DROPOUT:-}" ]] && overrides+=("model.norm_layer.dropout=$DROPOUT")
 if [[ -n "${DROPOUT_CHANNELS:-}" ]]; then
   [[ -n "${DROPOUT:-}" ]] && { echo "set DROPOUT or DROPOUT_CHANNELS, not both" >&2; exit 1; }
   overrides+=("model.norm_layer.dropout=$DROPOUT_CHANNELS" "model.norm_layer.dropout_channels=true")
 fi
+[[ -n "${HADAMARD:-}" ]] && overrides+=("model.norm_layer.hadamard=true")
+[[ -n "${FIXED_ALPHA:-}" ]] && overrides+=("model.norm_layer.learn_alpha=false")
 [[ -n "${FIRST_LAYER_LR_MULT:-}" ]] &&
   overrides+=("trainer.first_layer_lr_multiplier=$FIRST_LAYER_LR_MULT")
 OUT=${OUT:-outputs/baselines/${setting}_seed${SEED}}

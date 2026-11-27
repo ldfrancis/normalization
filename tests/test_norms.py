@@ -10,7 +10,7 @@ from torch import nn
 from nstudy.core import evaluator, norm_io
 from nstudy.core.model import Transformer, cifar_resnet, imagenet_resnet
 from nstudy.core.norms import (DynamicScale, DynamicSoftsign, DynamicTanh, ElementwiseNorm,
-                               LayerNorm2d)
+                               LayerNorm2d, hadamard_rotation)
 from nstudy.core.probes import model_probes
 from nstudy.core.tracking import run_tags
 
@@ -364,3 +364,107 @@ def test_every_elementwise_norm_takes_both_dropouts(norm, cls, channels):
     assert type(layer) is cls
     assert type(layer.dropout) is (nn.Dropout2d if channels else nn.Dropout)
     assert layer.dropout.p == 0.1
+
+
+@pytest.mark.parametrize("n", [1, 2, 16, 64, 512])
+def test_hadamard_rotation_is_orthogonal_with_entries_of_one_size(n):
+    torch.manual_seed(0)
+    rotation = hadamard_rotation(n)
+    assert torch.allclose(rotation @ rotation.T, torch.eye(n), atol=1e-6)
+    assert torch.allclose(rotation.abs(), torch.full((n, n), n**-0.5))
+    with pytest.raises(ValueError, match="power-of-2"):
+        hadamard_rotation(48)
+
+
+@pytest.mark.parametrize("cls", [DynamicTanh, DynamicSoftsign, DynamicScale])
+def test_hadamard_rotates_the_channels_between_f_and_gamma(cls):
+    torch.manual_seed(0)
+    layer = randomized(cls(16, hadamard=True, per_channel_alpha=True))
+    plain = cls(16, per_channel_alpha=True)
+    plain.load_state_dict({k: v for k, v in layer.state_dict().items() if k != "rotation"})
+    for x, axis in ((torch.randn(2, 16, 4, 4), 1), (torch.randn(2, 3, 16), -1)):
+        f = plain.squash(x, plain.per_channel(plain.alpha, x))
+        rotated = (f.movedim(axis, -1) @ layer.rotation.T).movedim(-1, axis)
+        expected = rotated * plain.per_channel(plain.weight, x) + plain.per_channel(plain.bias, x)
+        assert torch.allclose(layer(x), expected, atol=1e-6)
+    assert "rotation" in dict(layer.named_buffers())
+    assert not any(p is layer.rotation for p in layer.parameters())  # fixed, not trained
+
+
+def test_hadamard_rotations_differ_between_layers_and_follow_the_seed():
+    torch.manual_seed(0)
+    first, second = DynamicTanh(16, hadamard=True), DynamicTanh(16, hadamard=True)
+    torch.manual_seed(0)
+    again = DynamicTanh(16, hadamard=True)
+    assert not torch.equal(first.rotation, second.rotation)
+    assert torch.equal(first.rotation, again.rotation)
+
+
+def test_scalar_alpha_dyscale_rotation_folds_into_the_conv_before_it():
+    """gamma * R (alpha * conv(x)) + beta is gamma * conv'(x) + beta with conv' = alpha R W."""
+    torch.manual_seed(0)
+    conv = nn.Conv2d(8, 16, 3, padding=1, bias=False)
+    layer = randomized(DynamicScale(16, hadamard=True))
+    x = torch.randn(2, 8, 6, 6)
+    folded = nn.Conv2d(8, 16, 3, padding=1, bias=False)
+    with torch.no_grad():
+        folded.weight.copy_(layer.alpha * torch.einsum("oc,cikl->oikl", layer.rotation, conv.weight))
+    expected = folded(x) * layer.weight.view(1, -1, 1, 1) + layer.bias.view(1, -1, 1, 1)
+    assert torch.allclose(layer(conv(x)), expected, atol=1e-5)
+
+
+def test_hadamard_option_reaches_every_elementwise_norm():
+    hydra = pytest.importorskip("hydra")
+    from hydra.utils import instantiate
+
+    with hydra.initialize_config_dir(config_dir=str(CONFIG_DIR), version_base=None):
+        for norm in ("dyt", "dyt_channel", "dysoftsign", "dyscale"):
+            cfg = hydra.compose(config_name="config", overrides=[
+                "+experiment=cifar10_resnet", f"norm={norm}", "model.norm_layer.hadamard=true",
+                "model.norm_layer.dropout=0.05", "model.norm_layer.dropout_channels=true"])
+            layer = instantiate(cfg.model.norm_layer)(32)
+            assert layer.hadamard and layer.rotation.shape == (32, 32)
+            assert isinstance(layer.dropout, nn.Dropout2d)
+
+
+@pytest.mark.parametrize("cls", [DynamicTanh, DynamicSoftsign])
+def test_fixed_alpha_is_a_buffer_kept_at_its_initial_value(cls):
+    layer = cls(16, alpha_init=0.3, learn_alpha=False)
+    assert [name for name, _ in layer.named_parameters()] == ["weight", "bias"]
+    assert "alpha" in layer.state_dict() and layer.alpha.item() == pytest.approx(0.3)
+    optimizer = torch.optim.SGD(layer.parameters(), lr=0.1, weight_decay=0.1)
+    layer(torch.randn(2, 16, 4, 4)).square().sum().backward()
+    optimizer.step()
+    assert layer.alpha.item() == pytest.approx(0.3) and layer.weight.grad is not None
+
+
+def test_dyscale_without_alpha_is_gamma_x_plus_beta_with_gamma_from_one_over_sqrt_d():
+    layer = DynamicScale(16, learn_alpha=False)
+    assert [name for name, _ in layer.named_parameters()] == ["weight", "bias"]
+    assert torch.all(layer.alpha == 1) and torch.allclose(layer.weight, torch.full((16,), 0.25))
+    x = torch.randn(2, 16, 4, 4)
+    assert torch.allclose(layer(x), x / 4)
+    assert torch.allclose(DynamicScale(16, alpha_init=0.3, learn_alpha=False).weight, torch.full((16,), 0.3))
+    # gamma's gradient has no factor alpha: the same as that of alpha * gamma with alpha learned
+    (grad,) = torch.autograd.grad(layer(x).sum(), layer.weight)
+    assert torch.allclose(grad, x.sum(dim=(0, 2, 3)))
+
+
+def test_dyscale_without_alpha_starts_gamma_at_one_over_sqrt_fan_in_in_a_resnet():
+    model = cifar_resnet(depth=8, norm_layer=partial(DynamicScale, learn_alpha=False))
+    layers = {name: m for name, m in model.named_modules() if isinstance(m, DynamicScale)}
+    assert torch.allclose(layers["bn1"].weight, torch.full((16,), 27 ** -0.5))
+    assert torch.allclose(layers["layer2.0.bn2"].weight, torch.full((32,), 288 ** -0.5))
+    assert all(torch.all(m.alpha == 1) for m in layers.values())
+    assert not any("alpha" in name for name, _ in model.named_parameters())
+
+
+@pytest.mark.parametrize("norm", ["dyt", "dysoftsign", "dyscale"])
+def test_learn_alpha_option_reaches_the_layer(norm):
+    import hydra
+    from hydra.utils import instantiate
+
+    with hydra.initialize_config_dir(config_dir=str(CONFIG_DIR), version_base=None):
+        cfg = hydra.compose(config_name="config", overrides=[f"norm={norm}", "model.norm_layer.learn_alpha=false"])
+    layer = instantiate(cfg.model.norm_layer)(16)
+    assert not layer.learn_alpha and "alpha" not in dict(layer.named_parameters())
