@@ -7,4 +7,4 @@ __pycache__/
 run.sh
 sync*
 .vscode/
-*.md
+EXPERIMENTS.md
