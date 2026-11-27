@@ -4,6 +4,9 @@ task:
 # 90 epochs at batch size 256 (5005 iterations per epoch).
 max_steps: 450000
 accumulate: 1
+# Learning rate per layer: null for one rate (lr) for all, or the multiplier of lr for
+# layer 1 (0.1: layer 1 at lr * 0.1), rising linearly with depth to 1 at the last layer (fc).
+first_layer_lr_multiplier: null
 eval_every: 5000
 log_every: 100
 # Held-out splits evaluated every eval_every updates (ImageNet has no labelled test split).

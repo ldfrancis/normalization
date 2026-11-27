@@ -13,9 +13,12 @@
 # DATA:  cifar10 | cifar100 | imagenet | wmt14_en_de
 # Optional: SEED (default 0), GPUS (default 1 for CIFAR, 8 otherwise),
 #           GPU (which GPU a single-GPU run uses, default 0),
-#           NORM (replaces the model's norm layers: dyt|dysoftsign|none|batchnorm|layernorm|layernorm2d,
+#           NORM (replaces the model's norm layers: dyt|dyt_channel|dysoftsign|none|batchnorm|layernorm|layernorm2d,
 #                 see config/norm/; default: the model's own),
-#           OUT (run directory, default outputs/baselines/<data>_<model>[_<norm>]_seed<seed>).
+#           FIRST_LAYER_LR_MULT (ResNets: multiplier of the learning rate for layer 1,
+#                     rising linearly with depth to 1 at the last layer; e.g. 0.1.
+#                     Default: one rate for all layers),
+#           OUT (run directory, default outputs/baselines/<data>_<model>[_<norm>][_lrmult<m>]_seed<seed>).
 #
 #   MODEL=resnet56 DATA=cifar10 NORM=dyt ./scripts/baselines.sh
 #
@@ -60,8 +63,10 @@ case "$DATA:$MODEL" in
 esac
 
 GPUS=${GPUS:-$default_gpus}
-setting=${DATA}_${MODEL}${NORM:+_$NORM}
+setting=${DATA}_${MODEL}${NORM:+_$NORM}${FIRST_LAYER_LR_MULT:+_lrmult$FIRST_LAYER_LR_MULT}
 [[ -n "${NORM:-}" ]] && overrides+=("norm=$NORM")
+[[ -n "${FIRST_LAYER_LR_MULT:-}" ]] &&
+  overrides+=("trainer.first_layer_lr_multiplier=$FIRST_LAYER_LR_MULT")
 OUT=${OUT:-outputs/baselines/${setting}_seed${SEED}}
 args=("+experiment=$experiment" ${overrides[@]+"${overrides[@]}"} "seed=$SEED" "hydra.run.dir=$OUT"
       "wandb.group=$setting" "$@")

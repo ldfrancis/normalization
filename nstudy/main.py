@@ -20,6 +20,7 @@ Metrics go to ``metrics.jsonl`` in the run directory and to Weights & Biases
 """
 
 import logging
+from typing import Any
 
 import hydra
 import torch
@@ -28,9 +29,10 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 
 from nstudy.core import distributed
+from nstudy.core.model import ResNet
 from nstudy.core.probes import ProbeRecorder, model_probes
 from nstudy.core.tracking import WandbLogger, run_tags
-from nstudy.core.trainer import Logger, Trainer
+from nstudy.core.trainer import Logger, Trainer, layerwise_lr_groups
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +54,16 @@ def build_probes(cfg: DictConfig, model: torch.nn.Module, loaders: dict) -> Prob
     )
 
 
+def optimizer_params(cfg: DictConfig, model: torch.nn.Module) -> Any:
+    """``model``'s parameters, in groups with a rate per layer if ``trainer.first_layer_lr_multiplier`` is set."""
+    multiplier = cfg.trainer.get("first_layer_lr_multiplier")
+    if multiplier is None:
+        return model.parameters()
+    if not isinstance(model, ResNet):
+        raise ValueError("trainer.first_layer_lr_multiplier is only supported for ResNets")
+    return layerwise_lr_groups(model, cfg.trainer.optimizer.lr, multiplier)
+
+
 def build_trainer(cfg: DictConfig, output_dir: str, logger: Logger | None = None) -> Trainer:
     torch.manual_seed(cfg.seed)
     model = instantiate(cfg.model)
@@ -63,7 +75,7 @@ def build_trainer(cfg: DictConfig, output_dir: str, logger: Logger | None = None
     with distributed.main_process_first():
         loaders = instantiate(cfg.data)
     probes = build_probes(cfg, model, loaders)
-    optimizer = instantiate(cfg.trainer.optimizer)(model.parameters())
+    optimizer = instantiate(cfg.trainer.optimizer)(optimizer_params(cfg, model))
     scheduler = instantiate(cfg.trainer.scheduler)(optimizer)
     trainer = Trainer(
         model=model,

@@ -27,6 +27,7 @@ from torch.utils.data import DataLoader
 
 from nstudy.core import distributed
 from nstudy.core.evaluator import Task, evaluate
+from nstudy.core.probes import weighted_layers
 
 if TYPE_CHECKING:
     from nstudy.core.probes import ProbeRecorder
@@ -69,6 +70,34 @@ def step_schedule(
     return LambdaLR(
         optimizer, lambda step: step_factor(step, milestones, gamma, warmup_steps, warmup_factor)
     )
+
+
+def layerwise_lr_groups(model: nn.Module, lr: float, first_multiplier: float) -> list[dict[str, Any]]:
+    """Optimizer parameter groups whose learning rate rises linearly with depth.
+
+    Layer 1 gets ``first_multiplier * lr`` and the last layer (``fc``) ``lr``; layer ``d``
+    of ``D`` gets ``lr * m_d`` with
+    ``m_d = first_multiplier + (1 - first_multiplier) * (d - 1) / (D - 1)``. Depth is
+    counted as in ``nstudy.core.probes.weighted_layers`` (ResNets only). Any
+    other parameter gets the depth of the last conv or linear before it: a norm
+    layer that of the conv it normalizes, a projection shortcut that of its
+    block's last conv. The schedule (``LambdaLR``) scales every group's rate by
+    the same factor, so the ratios hold throughout training.
+    """
+    depth_of = weighted_layers(model)
+    total = max(depth_of.values())
+    params: dict[int, list[nn.Parameter]] = {}
+    depth = 1
+    for module in model.modules():
+        depth = depth_of.get(module, depth)
+        own = list(module.parameters(recurse=False))
+        if own:
+            params.setdefault(depth, []).extend(own)
+    return [
+        {"params": group, "lr": lr * (first_multiplier
+                           + (1 - first_multiplier) * (d - 1) / max(total - 1, 1))}
+        for d, group in sorted(params.items())
+    ]
 
 
 def noam_lr(step: int, d_model: int, warmup_steps: int) -> float:
@@ -169,7 +198,8 @@ class Trainer:
             * ``loss``: mean training loss since the last record.
             * ``error`` (classification): percentage of wrong predictions on
               the (augmented) training batches since the last record.
-            * ``lr``: learning rate of the update.
+            * ``lr``: learning rate of the update (the largest group's, that of the
+              last layer, with ``layerwise_lr_groups``).
             * ``epoch``: passes over the training data so far.
             * ``throughput``: training targets per second over all processes
               (images, or non-padding target tokens), evaluation time excluded.
@@ -446,7 +476,7 @@ class Trainer:
         recent: list[float] = []
         window_start = time.perf_counter()
         while self.step < self.max_steps:
-            learning_rate = self.optimizer.param_groups[0]["lr"]
+            learning_rate = max(group["lr"] for group in self.optimizer.param_groups)
             recent.append(self.train_step(batches))
             paused = time.perf_counter()
             self.run_probes()

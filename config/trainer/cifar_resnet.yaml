@@ -5,6 +5,9 @@ task:
 max_steps: 64000
 # Batches averaged into one update.
 accumulate: 1
+# Learning rate per layer: null for one rate (lr) for all, or the multiplier of lr for
+# layer 1 (0.1: layer 1 at lr * 0.1), rising linearly with depth to 1 at the last layer (fc).
+first_layer_lr_multiplier: null
 eval_every: 1000
 log_every: 100
 # Held-out splits evaluated every eval_every updates (Figure 6 plots the test error).

@@ -1,0 +1,6 @@
+# @package model.norm_layer
+# DyT with one alpha per channel, like gamma and beta: gamma_c * tanh(alpha_c * x) + beta_c.
+defaults:
+  - dyt
+  - _self_
+per_channel_alpha: true

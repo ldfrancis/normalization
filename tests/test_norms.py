@@ -171,7 +171,7 @@ def test_models_train_with_each_replacement(norm):
     assert logits.shape == (2, 3, 30) and torch.isfinite(logits).all()
 
 
-@pytest.mark.parametrize("norm", ["dyt", "dysoftsign", "dyscale", "none", "batchnorm", "layernorm",
+@pytest.mark.parametrize("norm", ["dyt", "dyt_channel", "dysoftsign", "dyscale", "none", "batchnorm", "layernorm",
                                   "layernorm2d"])
 @pytest.mark.parametrize("experiment", ["cifar10_resnet", "wmt14_transformer_base"])
 def test_norm_option_replaces_the_norm_layer_of_any_experiment(norm, experiment):
@@ -185,7 +185,7 @@ def test_norm_option_replaces_the_norm_layer_of_any_experiment(norm, experiment)
     with hydra.initialize_config_dir(config_dir=str(CONFIG_DIR), version_base=None):
         cfg = hydra.compose(config_name="config", overrides=[f"+experiment={experiment}",
                                                              f"norm={norm}"])
-    expected = {"dyt": DynamicTanh, "dysoftsign": DynamicSoftsign, "dyscale": DynamicScale,
+    expected = {"dyt": DynamicTanh, "dyt_channel": DynamicTanh, "dysoftsign": DynamicSoftsign, "dyscale": DynamicScale,
                 "none": nn.Identity,
                 "batchnorm": nn.BatchNorm2d, "layernorm": nn.LayerNorm,
                 "layernorm2d": LayerNorm2d}[norm]
@@ -276,3 +276,16 @@ def test_layernorm2d_normalizes_each_image_over_channels_and_positions():
     assert LayerNorm2d(16).weight.shape == (16,)
     plain = cifar_resnet(20, norm_layer=LayerNorm2d, residual=False)
     assert plain(torch.randn(2, 3, 32, 32)).shape == (2, 10)
+
+
+def test_dyt_channel_option_learns_one_alpha_per_channel():
+    hydra = pytest.importorskip("hydra")
+    from hydra.utils import instantiate
+
+    with hydra.initialize_config_dir(config_dir=str(CONFIG_DIR), version_base=None):
+        scalar, channel = (hydra.compose(config_name="config", overrides=[
+            "+experiment=cifar10_resnet", f"norm={norm}"]) for norm in ("dyt", "dyt_channel"))
+    assert instantiate(scalar.model.norm_layer)(16).alpha.shape == (1,)
+    layer = instantiate(channel.model.norm_layer)(16)
+    assert layer.alpha.shape == layer.weight.shape == layer.bias.shape == (16,)
+    assert torch.all(layer.alpha == 0.5)

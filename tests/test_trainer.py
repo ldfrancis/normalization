@@ -16,7 +16,8 @@ from nstudy.core import evaluator
 from nstudy.core.constants import PAD_ID
 from nstudy.core.data import tokenizer_path
 from nstudy.core.model import Transformer, cifar_resnet
-from nstudy.core.trainer import Trainer, noam_lr, noam_schedule, step_factor, step_schedule
+from nstudy.core.trainer import (Trainer, layerwise_lr_groups, noam_lr, noam_schedule, step_factor,
+                                 step_schedule)
 
 CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 CPU = torch.device("cpu")
@@ -385,3 +386,69 @@ def test_transformer_experiment_uses_the_transformer_paper_settings(
     assert translator.max_extra_length == 50
     expected_file = tokenizer_path(cfg.data.root, cfg.data.vocab_size)
     assert Path(translator.tokenizer_file) == expected_file
+
+
+# ---------------------------------------------------------------------------
+# Learning rate per layer
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("residual", [True, False])
+def test_layerwise_lr_rises_linearly_from_the_first_layer_to_the_last(residual):
+    from nstudy.core.model import cifar_resnet
+    from nstudy.core.probes import weighted_layers
+
+    model = cifar_resnet(56, residual=residual)
+    groups = layerwise_lr_groups(model, lr=0.1, first_multiplier=0.1)
+    assert len(groups) == 56
+    rates = [group["lr"] for group in groups]
+    assert rates[0] == pytest.approx(0.01) and rates[-1] == pytest.approx(0.1)
+    assert all(b - a == pytest.approx(0.09 / 55) for a, b in zip(rates, rates[1:]))
+    # Every parameter in exactly one group, with its layer's rate.
+    grouped = [id(p) for group in groups for p in group["params"]]
+    assert sorted(grouped) == sorted(id(p) for p in model.parameters())
+    rate_of = {id(p): group["lr"] for group in groups for p in group["params"]}
+    for module, depth in weighted_layers(model).items():
+        assert rate_of[id(module.weight)] == pytest.approx(rates[depth - 1])
+    # A norm layer learns at the rate of the conv it normalizes.
+    for conv, norm in model.conv_norm_pairs():
+        if conv in weighted_layers(model):
+            assert rate_of[id(norm.weight)] == rate_of[id(conv.weight)]
+
+
+def test_layerwise_lr_keeps_its_ratios_through_the_schedule():
+    from nstudy.core.model import cifar_resnet
+
+    model = cifar_resnet(20, residual=False)
+    optimizer = torch.optim.SGD(layerwise_lr_groups(model, lr=0.1, first_multiplier=0.1), lr=0.1)
+    scheduler = step_schedule(optimizer, milestones=[2], gamma=0.1)
+    for _ in range(3):
+        optimizer.step()
+        scheduler.step()
+    rates = [group["lr"] for group in optimizer.param_groups]
+    assert rates[0] == pytest.approx(0.001) and rates[-1] == pytest.approx(0.01)
+
+
+def test_layer_lr_option_builds_per_layer_groups():
+    hydra = pytest.importorskip("hydra")
+    from hydra.utils import instantiate
+
+    from nstudy.main import optimizer_params
+
+    with hydra.initialize_config_dir(config_dir=str(CONFIG_DIR), version_base=None):
+        default = hydra.compose(config_name="config", overrides=[
+            "+experiment=cifar10_resnet", "model.depth=20", "model.residual=false"])
+        layerwise = hydra.compose(config_name="config", overrides=[
+            "+experiment=cifar10_resnet", "model.depth=20", "model.residual=false",
+            "trainer.first_layer_lr_multiplier=0.1"])
+        transformer = hydra.compose(config_name="config", overrides=[
+            "+experiment=wmt14_transformer_base", "+trainer.first_layer_lr_multiplier=0.1"])
+    model = instantiate(layerwise.model)
+    single = instantiate(default.trainer.optimizer)(optimizer_params(default, model))
+    assert len(single.param_groups) == 1 and single.param_groups[0]["lr"] == 0.1
+    optimizer = instantiate(layerwise.trainer.optimizer)(optimizer_params(layerwise, model))
+    rates = [group["lr"] for group in optimizer.param_groups]
+    assert len(rates) == 20 and rates[0] == pytest.approx(0.01) and rates[-1] == pytest.approx(0.1)
+    with pytest.raises(ValueError, match="only supported for ResNets"):
+        optimizer_params(transformer, Transformer(vocab_size=30, d_model=16, num_heads=2,
+                                                  num_layers=1, d_ff=32))
