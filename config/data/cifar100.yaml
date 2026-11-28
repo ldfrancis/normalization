@@ -1,0 +1,10 @@
+# CIFAR-100 with the augmentation of He et al. 2016: pad 4, random crop, flip.
+_target_: nstudy.core.data.cifar_loaders
+name: cifar100
+root: data
+# Global batch size, split evenly among GPUs. The paper trained on one or two GPUs; use one.
+batch_size: 128
+# Training images held out for validation (45k/5k as in the paper). 0 trains on all 50k.
+val_size: 5000
+num_workers: 4
+seed: 0

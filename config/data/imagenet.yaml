@@ -1,0 +1,12 @@
+# ImageNet-1k.
+_target_: nstudy.core.data.imagenet_loaders
+# huggingface: download ILSVRC/imagenet-1k into root (gated: accept the terms and log in first).
+# folder: read image files from root/train/<class>/* and root/val/<class>/*.
+source: huggingface
+root: data/imagenet
+# Global batch size, split evenly among GPUs (32 per GPU on 8 GPUs, which is also
+# the batch each BatchNorm layer normalizes over).
+batch_size: 256
+num_workers: 8
+image_size: 224
+seed: 0

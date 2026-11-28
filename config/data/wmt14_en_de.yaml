@@ -1,0 +1,14 @@
+# WMT 2014 English-German (Vaswani et al. 2017, Section 5.1).
+_target_: nstudy.core.data.wmt14_en_de_loaders
+root: data/wmt14_en_de
+# Shared source-target BPE vocabulary.
+vocab_size: 37000
+# Padded tokens per batch, per side, over all GPUs (3125 per GPU on 8 GPUs).
+# The paper's 25000 was spread over 8 GPUs.
+max_tokens: 25000
+# Training pairs longer than this on either side are skipped.
+max_length: 256
+# Sentences per evaluation batch on each GPU.
+eval_batch_size: 64
+num_workers: 2
+seed: 0
